@@ -14,149 +14,161 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
+// Evita conflitos de classe em ambientes multisite ou com múltiplos plugins
 class Vettryx_Tracking_Manager {
 
-    // Nome da chave no banco de dados (wp_options)
-    private $option_name = 'vettryx_tracking_scripts';
+    // Nome da opção no banco de dados para armazenar os IDs e scripts
+    private $option_name = 'vettryx_tracking_data';
 
+    // Construtor: Define hooks para admin e front-end
     public function __construct() {
-        // Hooks do painel de administração
         if ( is_admin() ) {
             add_action( 'admin_menu', [ $this, 'add_submenu_page' ] );
             add_action( 'admin_init', [ $this, 'register_settings' ] );
         } else {
-            // Hooks do Front-end (Injeção dos scripts)
-            // Prioridade 99 para rodar mais pro final, ou 1 para rodar no topo
             add_action( 'wp_head', [ $this, 'inject_head_scripts' ], 99 );
             add_action( 'wp_body_open', [ $this, 'inject_body_scripts' ], 1 );
-            add_action( 'wp_footer', [ $this, 'inject_footer_scripts' ], 99 );
         }
     }
 
-    /**
-     * Cria o submenu dentro do menu principal do Core ("VETTRYX Tech")
-     */
+    // Adiciona a página de configurações no menu do WordPress
     public function add_submenu_page() {
         add_submenu_page(
-            'vettryx-core-modules',               // Slug do menu pai (do Core)
-            'Tracking Manager',                   // Título da página
-            'Tracking Scripts',                   // Título no menu
-            'manage_options',                     // Capacidade (Apenas administradores)
-            'vettryx-tracking-manager',           // Slug desta página
-            [ $this, 'render_admin_page' ]        // Função que desenha a tela
+            'vettryx-core-modules',
+            'Tracking Manager',
+            'Tracking Manager',
+            'manage_options',
+            'vettryx-tracking-manager',
+            [ $this, 'render_admin_page' ]
         );
     }
 
-    /**
-     * Registra a variável no banco de dados
-     */
+    // Registra as configurações para armazenar os IDs e scripts no banco de dados
     public function register_settings() {
         register_setting( 'vettryx_tracking_group', $this->option_name, [
             'type'              => 'array',
-            'sanitize_callback' => [ $this, 'sanitize_scripts' ]
+            'sanitize_callback' => [ $this, 'sanitize_data' ]
         ] );
     }
 
     /**
-     * Sanitização Focada: NÃO removemos tags <script> ou <iframe>.
-     * A segurança é garantida verificando a permissão do usuário que está salvando.
+     * Sanitiza os dados de entrada para garantir segurança e integridade
      */
-    public function sanitize_scripts( $input ) {
-        // Se não for administrador, aborta e mantém o que já estava no banco
+    public function sanitize_data( $input ) {
         if ( ! current_user_can( 'manage_options' ) ) {
             return get_option( $this->option_name );
         }
 
-        // Retorna o array bruto para manter a integridade dos códigos de rastreamento
         return [
-            'head'   => isset( $input['head'] ) ? $input['head'] : '',
-            'body'   => isset( $input['body'] ) ? $input['body'] : '',
-            'footer' => isset( $input['footer'] ) ? $input['footer'] : '',
+            'gtm_id'   => sanitize_text_field( trim( $input['gtm_id'] ?? '' ) ),
+            'ga4_id'   => sanitize_text_field( trim( $input['ga4_id'] ?? '' ) ),
+            'pixel_id' => sanitize_text_field( trim( $input['pixel_id'] ?? '' ) ),
+            'custom'   => $input['custom'] ?? '', // Mantém tags HTML intactas para emergências
         ];
     }
 
     /**
-     * Front-end: Injeta no <head>
+     * Injeta os scripts de rastreamento no <head> do site, otimizados para performance e compatibilidade
      */
     public function inject_head_scripts() {
-        $scripts = get_option( $this->option_name );
-        if ( ! empty( $scripts['head'] ) ) {
-            echo "\n\n" . $scripts['head'] . "\n";
+        $data = get_option( $this->option_name, [] );
+        $output = "";
+
+        // 1. Google Tag Manager (GTM)
+        if ( ! empty( $data['gtm_id'] ) ) {
+            $gtm = esc_js( $data['gtm_id'] );
+            $output .= "\n";
+            $output .= "<script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':\n";
+            $output .= "new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],\n";
+            $output .= "j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=\n";
+            $output .= "'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);\n";
+            $output .= "})(window,document,'script','dataLayer','{$gtm}');</script>\n";
         }
+
+        // 2. Google Analytics 4 (GA4) - Caso não use GTM
+        if ( ! empty( $data['ga4_id'] ) ) {
+            $ga4 = esc_js( $data['ga4_id'] );
+            $output .= "\n";
+            $output .= "<script async src=\"https://www.googletagmanager.com/gtag/js?id={$ga4}\"></script>\n";
+            $output .= "<script>\n  window.dataLayer = window.dataLayer || [];\n  function gtag(){dataLayer.push(arguments);}\n  gtag('js', new Date());\n  gtag('config', '{$ga4}');\n</script>\n";
+        }
+
+        // 3. Meta Pixel (Facebook) - Caso não use GTM
+        if ( ! empty( $data['pixel_id'] ) ) {
+            $pixel = esc_js( $data['pixel_id'] );
+            $output .= "\n";
+            $output .= "<script>\n!function(f,b,e,v,n,t,s)\n{if(f.fbq)return;n=f.fbq=function(){n.callMethod?\nn.callMethod.apply(n,arguments):n.queue.push(arguments)};\nif(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';\nn.queue=[];t=b.createElement(e);t.async=!0;\nt.src=v;s=b.getElementsByTagName(e)[0];\ns.parentNode.insertBefore(t,s)}(window, document,'script',\n'https://connect.facebook.net/en_US/fbevents.js');\nfbq('init', '{$pixel}');\nfbq('track', 'PageView');\n</script>\n";
+        }
+
+        // 4. Scripts Customizados de Emergência
+        if ( ! empty( $data['custom'] ) ) {
+            $output .= "\n" . $data['custom'] . "\n";
+        }
+
+        echo $output;
     }
 
     /**
-     * Front-end: Injeta após abrir o <body>
+     * Injeta o iframe do GTM no início do <body> para garantir que o GTM funcione mesmo com bloqueadores de anúncios, seguindo as melhores práticas recomendadas pelo Google
      */
     public function inject_body_scripts() {
-        $scripts = get_option( $this->option_name );
-        if ( ! empty( $scripts['body'] ) ) {
-            echo "\n\n" . $scripts['body'] . "\n";
+        $data = get_option( $this->option_name, [] );
+        
+        if ( ! empty( $data['gtm_id'] ) ) {
+            $gtm = esc_attr( $data['gtm_id'] );
+            echo "\n\n";
+            echo "<noscript><iframe src=\"https://www.googletagmanager.com/ns.html?id={$gtm}\" height=\"0\" width=\"0\" style=\"display:none;visibility:hidden\"></iframe></noscript>\n";
         }
     }
 
-    /**
-     * Front-end: Injeta no <footer>
-     */
-    public function inject_footer_scripts() {
-        $scripts = get_option( $this->option_name );
-        if ( ! empty( $scripts['footer'] ) ) {
-            echo "\n\n" . $scripts['footer'] . "\n";
-        }
-    }
-
-    /**
-     * Desenha a interface do formulário no painel
-     */
+    // Renderiza a página de configurações no painel administrativo do WordPress, com campos para GTM, GA4, Pixel e scripts customizados
     public function render_admin_page() {
-        // Pega os scripts do banco, ou array vazio por padrão
-        $scripts = get_option( $this->option_name, [ 'head' => '', 'body' => '', 'footer' => '' ] );
+        $data = get_option( $this->option_name, [ 'gtm_id' => '', 'ga4_id' => '', 'pixel_id' => '', 'custom' => '' ] );
         ?>
         <div class="wrap">
             <h1><?php _e( 'VETTRYX Tech - Tracking Manager', 'vettryx-wp-core' ); ?></h1>
-            <p><?php _e( 'Insira seus códigos de rastreamento abaixo. Os scripts são injetados de forma nativa para garantir a máxima performance.', 'vettryx-wp-core' ); ?></p>
+            <p><?php _e( 'Insira apenas os IDs de rastreamento. O sistema injetará os códigos otimizados automaticamente.', 'vettryx-wp-core' ); ?></p>
             
             <form method="post" action="options.php">
                 <?php settings_fields( 'vettryx_tracking_group' ); ?>
                 
                 <table class="form-table">
                     <tr>
-                        <th scope="row">
-                            <label for="vettryx_head"><?php _e( 'Scripts no <head>', 'vettryx-wp-core' ); ?></label><br>
-                            <small style="font-weight: normal; color: #666;"><?php _e( 'Ideal para Google Analytics, Meta Pixel, TikTok, etc.', 'vettryx-wp-core' ); ?></small>
-                        </th>
+                        <th scope="row"><label for="gtm_id">Google Tag Manager ID</label></th>
                         <td>
-                            <textarea name="<?php echo esc_attr( $this->option_name ); ?>[head]" id="vettryx_head" rows="8" class="large-text code" placeholder="<script>...</script>"><?php echo esc_textarea( $scripts['head'] ); ?></textarea>
+                            <input type="text" name="<?php echo esc_attr( $this->option_name ); ?>[gtm_id]" id="gtm_id" value="<?php echo esc_attr( $data['gtm_id'] ); ?>" class="regular-text" placeholder="Ex: GTM-XXXXXXX">
+                            <p class="description">Recomendado. Use o GTM para gerenciar as demais tags.</p>
                         </td>
                     </tr>
-                    
                     <tr>
-                        <th scope="row">
-                            <label for="vettryx_body"><?php _e( 'Scripts após o <body>', 'vettryx-wp-core' ); ?></label><br>
-                            <small style="font-weight: normal; color: #666;"><?php _e( 'Ideal para a tag <noscript> do Google Tag Manager.', 'vettryx-wp-core' ); ?></small>
-                        </th>
+                        <th scope="row"><label for="ga4_id">Google Analytics 4 ID</label></th>
                         <td>
-                            <textarea name="<?php echo esc_attr( $this->option_name ); ?>[body]" id="vettryx_body" rows="8" class="large-text code" placeholder="<noscript>...</noscript>"><?php echo esc_textarea( $scripts['body'] ); ?></textarea>
+                            <input type="text" name="<?php echo esc_attr( $this->option_name ); ?>[ga4_id]" id="ga4_id" value="<?php echo esc_attr( $data['ga4_id'] ); ?>" class="regular-text" placeholder="Ex: G-XXXXXXXXXX">
+                            <p class="description">Preencha apenas se não estiver usando o GTM acima.</p>
                         </td>
                     </tr>
-                    
                     <tr>
-                        <th scope="row">
-                            <label for="vettryx_footer"><?php _e( 'Scripts no <footer>', 'vettryx-wp-core' ); ?></label><br>
-                            <small style="font-weight: normal; color: #666;"><?php _e( 'Scripts de menor prioridade ou widgets.', 'vettryx-wp-core' ); ?></small>
-                        </th>
+                        <th scope="row"><label for="pixel_id">Meta Pixel ID</label></th>
                         <td>
-                            <textarea name="<?php echo esc_attr( $this->option_name ); ?>[footer]" id="vettryx_footer" rows="8" class="large-text code"><?php echo esc_textarea( $scripts['footer'] ); ?></textarea>
+                            <input type="text" name="<?php echo esc_attr( $this->option_name ); ?>[pixel_id]" id="pixel_id" value="<?php echo esc_attr( $data['pixel_id'] ); ?>" class="regular-text" placeholder="Ex: 123456789012345">
+                            <p class="description">Preencha apenas se não estiver usando o GTM acima.</p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="custom_script">Scripts Extras / Head</label></th>
+                        <td>
+                            <textarea name="<?php echo esc_attr( $this->option_name ); ?>[custom]" id="custom_script" rows="5" class="large-text code" placeholder="<script>...</script>"><?php echo esc_textarea( $data['custom'] ); ?></textarea>
+                            <p class="description">Use apenas para códigos de verificação de domínio ou ferramentas de terceiros que não suportam GTM.</p>
                         </td>
                     </tr>
                 </table>
                 
-                <?php submit_button( __( 'Salvar Scripts', 'vettryx-wp-core' ) ); ?>
+                <?php submit_button( 'Salvar Configurações' ); ?>
             </form>
         </div>
         <?php
     }
 }
 
-// Inicia o módulo
+// Inicializa o plugin
 new Vettryx_Tracking_Manager();
