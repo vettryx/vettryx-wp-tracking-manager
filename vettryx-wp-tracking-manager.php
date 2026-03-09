@@ -3,7 +3,7 @@
  * Plugin Name: VETTRYX WP Tracking Manager
  * Plugin URI:  https://github.com/vettryx/vettryx-wp-tracking-manager
  * Description: Gerenciador nativo e blindado para injeção de scripts de marketing (Analytics, Pixel, GTM, etc).
- * Version:     1.0.0
+ * Version:     1.0.1
  * Author:      VETTRYX Tech
  * Author URI:  https://vettryx.com.br
  * License:     GPLv3
@@ -71,6 +71,11 @@ class Vettryx_Tracking_Manager {
      * Injeta os scripts de rastreamento no <head> do site, otimizados para performance e compatibilidade
      */
     public function inject_head_scripts() {
+        // Trava da LGPD: Só injeta os scripts se o consentimento de marketing foi dado
+        if ( function_exists( 'wp_has_consent' ) && ! wp_has_consent( 'marketing' ) ) {
+            return;
+        }
+
         $data = get_option( $this->option_name, [] );
         $output = "";
 
@@ -112,6 +117,11 @@ class Vettryx_Tracking_Manager {
      * Injeta o iframe do GTM no início do <body> para garantir que o GTM funcione mesmo com bloqueadores de anúncios, seguindo as melhores práticas recomendadas pelo Google
      */
     public function inject_body_scripts() {
+        // Trava da LGPD: Só injeta os scripts se o consentimento de marketing foi dado
+        if ( function_exists( 'wp_has_consent' ) && ! wp_has_consent( 'marketing' ) ) {
+            return;
+        }
+
         $data = get_option( $this->option_name, [] );
         
         if ( ! empty( $data['gtm_id'] ) ) {
