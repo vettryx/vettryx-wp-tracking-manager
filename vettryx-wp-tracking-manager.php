@@ -1,12 +1,13 @@
 <?php
 /**
  * Plugin Name: VETTRYX WP Tracking Manager
- * Plugin URI:  https://github.com/vettryx/vettryx-wp-tracking-manager
+ * Plugin URI:  https://github.com/vettryx/vettryx-wp-core
  * Description: Gerenciador nativo e blindado para injeção de scripts de marketing (Analytics, Pixel, GTM, etc).
- * Version:     1.0.1
+ * Version:     1.0.2
  * Author:      VETTRYX Tech
  * Author URI:  https://vettryx.com.br
- * License:     GPLv3
+ * License:     Proprietária (Uso Comercial Exclusivo)
+ * Vettryx Icon: dashicons-chart-area
  */
 
 // Segurança: Impede o acesso direto ao arquivo
